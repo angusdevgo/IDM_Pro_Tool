@@ -1,0 +1,17 @@
+# 临时文件与备份
+*.bak
+*.BAK
+*.tmp
+*.log
+IDM_Reg_Backup.reg
+
+# 编译生成临时调试文件
+*.pdb
+*.obj
+
+# 编辑器与 IDE
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
