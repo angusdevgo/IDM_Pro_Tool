@@ -185,5 +185,5 @@ IDM_Pro_Tool/
 
 本项目基于 [MIT License](LICENSE) 协议开源。欢迎提交 Issue 或 Pull Request 完善支持！
  
-## Community & Support / 社区与支持
-- **LINUX DO 社区**: [https://linux.do](https://linux.do/) -
+## 🤝 社区与支持
+- **LINUX DO 社区**: [https://linux.do](https://linux.do)
