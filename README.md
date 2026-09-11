@@ -62,6 +62,7 @@
 - **🛡️ Hosts 验证盾牌**：智能向系统 Hosts 文件添加/移除 `tonec.com`、`registeridm.com` 等 8 组关键验证服务器的 `127.0.0.1` 回环映射，从网络层截断黑名单检测与序列号遥测。
 - **⚙️ 官方更新策略控制**：一键切换 `CheckUpdtVM` 策略键，禁止烦人的更新弹窗，或按需重新放行。
 - **🧰 注册表与路径百宝箱**：
+  - **📍 手动定位 IDM 路径**：完美支持非系统盘（D盘、E盘等）或便携式 IDM 安装路径，支持文件选择对话框一键定位、多盘符智能轮询探测与永久记忆
   - 一键直达 IDM 程序根目录
   - 一键唤醒并自动跳转至注册表项 `HKEY_CURRENT_USER\Software\DownloadManager`
   - 一键将当前所有 IDM 注册表配置完整导出至桌面备忘（`IDM_Reg_Backup.reg`）
@@ -135,6 +136,9 @@ IDM_Pro_Tool.exe -register "VIP_User" "vip@domain.com"
 
 # 一键还原为官方原版
 IDM_Pro_Tool.exe -restore
+
+# 手动指定 IDM 安装路径（针对非 C 盘或自定义安装目录）
+IDM_Pro_Tool.exe -setpath "D:\Software\Internet Download Manager"
 
 # 查看命令行帮助
 IDM_Pro_Tool.exe -help

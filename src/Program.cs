@@ -82,6 +82,7 @@ namespace IDM_Toolkit_Wpf
                 if (firstArg == "-patch" || firstArg == "/patch" ||
                     firstArg == "-register" || firstArg == "/register" ||
                     firstArg == "-restore" || firstArg == "/restore" ||
+                    firstArg == "-setpath" || firstArg == "/setpath" ||
                     firstArg == "-help" || firstArg == "/help" || firstArg == "/?")
                 {
                     InitConsoleOutput();
@@ -96,6 +97,25 @@ namespace IDM_Toolkit_Wpf
                         Console.WriteLine("  -patch                执行模式一：底层深度解锁（18处校验点修补与签名剥离）");
                         Console.WriteLine("  -register [name] [email] [serial]  执行模式三：个性化登记并联动解锁");
                         Console.WriteLine("  -restore              执行一键还原官方原版主程序与官方未注册配置");
+                        Console.WriteLine("  -setpath <dir/exe>    手动设定并持久化 IDM 安装目录或 IDMan.exe 绝对路径");
+                        return;
+                    }
+
+                    if (firstArg == "-setpath" || firstArg == "/setpath")
+                    {
+                        if (args.Length > 1)
+                        {
+                            string errMsg;
+                            bool ok = MainWindow.SetCustomIDMPath(args[1], out errMsg);
+                            if (ok)
+                                Console.WriteLine("Set IDM Path SUCCESS: " + MainWindow.GetIDMDir());
+                            else
+                                Console.WriteLine("Set IDM Path FAILED: " + errMsg);
+                        }
+                        else
+                        {
+                            Console.WriteLine("Error: 请提供 IDM 目录或 IDMan.exe 路径，例如: -setpath \"D:\\Software\\IDM\"");
+                        }
                         return;
                     }
 
@@ -594,6 +614,7 @@ namespace IDM_Toolkit_Wpf
         private TextBlock lblStatVer;
         private TextBlock lblStatAuth;
         private TextBlock lblStatProc;
+        private TextBlock lblStatPath;
         private Button btnRestoreOrig;
 
         // 选项卡内容区
@@ -810,12 +831,13 @@ namespace IDM_Toolkit_Wpf
             Grid statRows = new Grid();
             statRows.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             statRows.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            for (int i = 0; i < 4; i++) statRows.RowDefinitions.Add(new RowDefinition { Height = new GridLength(24) });
+            for (int i = 0; i < 5; i++) statRows.RowDefinitions.Add(new RowDefinition { Height = new GridLength(24) });
 
             lblStatInstall = AddStatusRow(statRows, "软件安装:", "检测中...", 0, Color.FromRgb(230, 237, 243));
             lblStatVer = AddStatusRow(statRows, "内核版本:", "未知", 1, Color.FromRgb(201, 209, 217));
             lblStatAuth = AddStatusRow(statRows, "授权状态:", "检测中", 2, ColBlue);
             lblStatProc = AddStatusRow(statRows, "后台进程:", "检测中", 3, ColAmber);
+            lblStatPath = AddStatusRow(statRows, "主控路径:", "自动检测", 4, Color.FromRgb(139, 148, 158));
 
             statStack.Children.Add(statRows);
             statusCard.Child = statStack;
@@ -834,16 +856,16 @@ namespace IDM_Toolkit_Wpf
             Grid.SetRow(ctrlTitle, 2);
             sidebarGrid.Children.Add(ctrlTitle);
 
-            // --- 4 个快捷控制按钮 ---
+            // --- 5 个快捷控制按钮 ---
             StackPanel btnStack = new StackPanel();
-            string[] opNames = { "🔄 刷新运行状态", "⏹️ 强行终止 IDM 进程", "▶️ 启动 / 重启 IDM", "♻️ 一键还原官方原版" };
+            string[] opNames = { "🔄 刷新运行状态", "📍 手动定位 IDM 路径", "⏹️ 强行终止 IDM 进程", "▶️ 启动 / 重启 IDM", "♻️ 一键还原官方原版" };
             for (int i = 0; i < opNames.Length; i++)
             {
                 Button btn = CreateCustomButton(opNames[i], ColBtnDark, ColBtnDarkHover, double.NaN, 34, 8, Color.FromRgb(240, 246, 252), 12, false, ColBorderMuted, 1);
                 btn.Margin = new Thickness(0, 0, 0, 6);
                 int idx = i;
                 btn.Click += (s, e) => HandleSidebarAction(idx);
-                if (idx == 3) btnRestoreOrig = btn;
+                if (idx == 4) btnRestoreOrig = btn;
                 btnStack.Children.Add(btn);
             }
             Grid.SetRow(btnStack, 3);
@@ -1665,11 +1687,13 @@ namespace IDM_Toolkit_Wpf
             toolsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             toolsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(12) });
             toolsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            toolsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(12) });
+            toolsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-            string[] titles = { "💾 备份配置", "🧭 注册表", "📂 安装目录" };
-            string[] subs = { "导出 .reg 到桌面", "打开 regedit 编辑器", "定位 IDMan 根目录" };
+            string[] titles = { "💾 备份配置", "🧭 注册表", "📂 安装目录", "📍 定位路径" };
+            string[] subs = { "导出 .reg 到桌面", "打开 regedit", "打开 IDMan 目录", "自定义 IDMan.exe" };
 
-            for (int i = 0; i < 3; i++)
+            for (int i = 0; i < 4; i++)
             {
                 int idx = i;
                 Button b = CreateTileButton(titles[i], subs[i]);
@@ -1827,13 +1851,252 @@ namespace IDM_Toolkit_Wpf
             lblGlobalStatus.Text = "ℹ️ " + msg;
         }
 
+        private static string _customIDMDir = null;
+
         public static string GetIDMDir()
         {
+            // 0. 优先使用内存中的自定义指定目录
+            if (!string.IsNullOrEmpty(_customIDMDir) && Directory.Exists(_customIDMDir))
+            {
+                if (File.Exists(Path.Combine(_customIDMDir, "IDMan.exe")))
+                    return _customIDMDir;
+            }
+
+            // 1. 读取配置文件或保存的持久化设置
+            try
+            {
+                string cfgPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "idm_path.cfg");
+                if (File.Exists(cfgPath))
+                {
+                    string saved = File.ReadAllText(cfgPath, Encoding.UTF8).Trim();
+                    if (!string.IsNullOrEmpty(saved))
+                    {
+                        if (File.Exists(saved) && Path.GetFileName(saved).Equals("IDMan.exe", StringComparison.OrdinalIgnoreCase))
+                            saved = Path.GetDirectoryName(saved);
+                        if (Directory.Exists(saved) && File.Exists(Path.Combine(saved, "IDMan.exe")))
+                        {
+                            _customIDMDir = saved;
+                            return _customIDMDir;
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            // 2. 从注册表 HKCU\Software\DownloadManager\ExePath 读取
+            try
+            {
+                using (RegistryKey k = Registry.CurrentUser.OpenSubKey(@"Software\DownloadManager"))
+                {
+                    if (k != null)
+                    {
+                        object p = k.GetValue("ExePath");
+                        if (p != null)
+                        {
+                            string exePath = p.ToString().Trim();
+                            if (File.Exists(exePath))
+                            {
+                                string dir = Path.GetDirectoryName(exePath);
+                                if (Directory.Exists(dir)) return dir;
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            // 3. 从卸载项注册表读取 (支持非系统盘安装的 IDM)
+            string[] uninstallKeys = new string[]
+            {
+                @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Internet Download Manager",
+                @"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Internet Download Manager"
+            };
+            foreach (string uKey in uninstallKeys)
+            {
+                try
+                {
+                    using (RegistryKey k = Registry.LocalMachine.OpenSubKey(uKey))
+                    {
+                        if (k != null)
+                        {
+                            object icon = k.GetValue("DisplayIcon");
+                            if (icon != null)
+                            {
+                                string iconPath = icon.ToString().Trim().Trim('"');
+                                if (File.Exists(iconPath))
+                                {
+                                    string dir = Path.GetDirectoryName(iconPath);
+                                    if (Directory.Exists(dir)) return dir;
+                                }
+                            }
+                            object uninst = k.GetValue("UninstallString");
+                            if (uninst != null)
+                            {
+                                string uninstPath = uninst.ToString().Trim().Trim('"');
+                                if (File.Exists(uninstPath))
+                                {
+                                    string dir = Path.GetDirectoryName(uninstPath);
+                                    if (Directory.Exists(dir) && File.Exists(Path.Combine(dir, "IDMan.exe"))) return dir;
+                                }
+                            }
+                        }
+                    }
+                }
+                catch { }
+            }
+
+            // 4. 从后台正在运行的 IDMan 进程主模块读取 (若正在运行，直接精准抓取实际路径)
+            try
+            {
+                Process[] procs = Process.GetProcessesByName("IDMan");
+                if (procs.Length > 0 && procs[0].MainModule != null)
+                {
+                    string procExe = procs[0].MainModule.FileName;
+                    if (File.Exists(procExe))
+                    {
+                        string dir = Path.GetDirectoryName(procExe);
+                        if (Directory.Exists(dir)) return dir;
+                    }
+                }
+            }
+            catch { }
+
+            // 5. 传统默认安装路径
             string p1 = @"C:\Program Files (x86)\Internet Download Manager";
-            if (Directory.Exists(p1)) return p1;
+            if (Directory.Exists(p1) && File.Exists(Path.Combine(p1, "IDMan.exe"))) return p1;
             string p2 = @"C:\Program Files\Internet Download Manager";
+            if (Directory.Exists(p2) && File.Exists(Path.Combine(p2, "IDMan.exe"))) return p2;
+
+            // 6. 遍历所有固定驱动器 (D:, E:, F:, G: 等) 常见路径探测
+            try
+            {
+                foreach (DriveInfo drive in DriveInfo.GetDrives())
+                {
+                    if (drive.IsReady && drive.DriveType == DriveType.Fixed)
+                    {
+                        string[] candidates = new string[]
+                        {
+                            Path.Combine(drive.RootDirectory.FullName, "Program Files (x86)", "Internet Download Manager"),
+                            Path.Combine(drive.RootDirectory.FullName, "Program Files", "Internet Download Manager"),
+                            Path.Combine(drive.RootDirectory.FullName, "Internet Download Manager"),
+                            Path.Combine(drive.RootDirectory.FullName, "IDM"),
+                            Path.Combine(drive.RootDirectory.FullName, "Software", "Internet Download Manager"),
+                            Path.Combine(drive.RootDirectory.FullName, "Software", "IDM"),
+                            Path.Combine(drive.RootDirectory.FullName, "Apps", "Internet Download Manager"),
+                            Path.Combine(drive.RootDirectory.FullName, "Apps", "IDM")
+                        };
+                        foreach (string cand in candidates)
+                        {
+                            if (Directory.Exists(cand) && File.Exists(Path.Combine(cand, "IDMan.exe")))
+                                return cand;
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            if (Directory.Exists(p1)) return p1;
             if (Directory.Exists(p2)) return p2;
             return p1;
+        }
+
+        public static bool SetCustomIDMPath(string selectedPath, out string errorMsg)
+        {
+            errorMsg = null;
+            try
+            {
+                if (string.IsNullOrEmpty(selectedPath))
+                {
+                    errorMsg = "选择的路径为空。";
+                    return false;
+                }
+                string targetDir = selectedPath.Trim().Trim('"');
+                if (File.Exists(targetDir))
+                {
+                    if (Path.GetFileName(targetDir).Equals("IDMan.exe", StringComparison.OrdinalIgnoreCase))
+                    {
+                        targetDir = Path.GetDirectoryName(targetDir);
+                    }
+                    else
+                    {
+                        errorMsg = "所选文件不是 IDMan.exe 主程序。";
+                        return false;
+                    }
+                }
+
+                if (!Directory.Exists(targetDir))
+                {
+                    errorMsg = "目标目录不存在: " + targetDir;
+                    return false;
+                }
+
+                string idmExe = Path.Combine(targetDir, "IDMan.exe");
+                if (!File.Exists(idmExe))
+                {
+                    errorMsg = "在目录 [" + targetDir + "] 下未找到 IDMan.exe 主程序文件！";
+                    return false;
+                }
+
+                _customIDMDir = targetDir;
+
+                // 持久化保存至本地配置文件
+                try
+                {
+                    string cfgPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "idm_path.cfg");
+                    File.WriteAllText(cfgPath, targetDir, Encoding.UTF8);
+                }
+                catch { }
+
+                // 同步更新注册表 ExePath 键值
+                try
+                {
+                    using (RegistryKey k = Registry.CurrentUser.CreateSubKey(@"Software\DownloadManager"))
+                    {
+                        if (k != null)
+                        {
+                            k.SetValue("ExePath", idmExe, RegistryValueKind.String);
+                        }
+                    }
+                }
+                catch { }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                errorMsg = ex.Message;
+                return false;
+            }
+        }
+
+        public void PromptSelectIDMPath()
+        {
+            OpenFileDialog dlg = new OpenFileDialog();
+            dlg.Title = "手动定位 IDMan.exe 主程序";
+            dlg.Filter = "IDM 主程序 (IDMan.exe)|IDMan.exe|所有文件 (*.*)|*.*";
+            dlg.FileName = "IDMan.exe";
+            dlg.CheckFileExists = true;
+
+            string curr = GetIDMDir();
+            if (Directory.Exists(curr))
+                dlg.InitialDirectory = curr;
+
+            bool? result = dlg.ShowDialog(this);
+            if (result == true && !string.IsNullOrEmpty(dlg.FileName))
+            {
+                string err;
+                if (SetCustomIDMPath(dlg.FileName, out err))
+                {
+                    Log("✓ 已成功手动定位 IDM 路径: " + _customIDMDir);
+                    RefreshAllStatus();
+                    ModernDialog.ShowSuccess(this, "定位成功", "IDM 主程序路径已成功更新并记忆：\n\n• 当前路径：" + _customIDMDir + "\n• 主程序：IDMan.exe\n\n所有核心解锁、备份与还原功能将即刻生效于此路径！");
+                }
+                else
+                {
+                    Log("定位 IDM 路径失败: " + err);
+                    ModernDialog.ShowError(this, "定位失败", "未能应用所选路径:\n\n" + err);
+                }
+            }
         }
 
         public static string GetDefaultUserName()
@@ -1876,7 +2139,7 @@ namespace IDM_Toolkit_Wpf
             }
             else
             {
-                lblStatInstall.Text = "未安装 ✗";
+                lblStatInstall.Text = "未识别 (点击定位) ✗";
                 lblStatInstall.Foreground = new SolidColorBrush(Color.FromRgb(248, 81, 73));
             }
 
@@ -1942,7 +2205,27 @@ namespace IDM_Toolkit_Wpf
                 lblStatProc.Foreground = new SolidColorBrush(Color.FromRgb(139, 148, 158));
             }
 
-            // 5. 原版备份按钮状态
+            // 5. 路径来源简报展示
+            if (lblStatPath != null)
+            {
+                if (!string.IsNullOrEmpty(_customIDMDir))
+                {
+                    lblStatPath.Text = "手动指定 📍";
+                    lblStatPath.Foreground = new SolidColorBrush(ColBlue);
+                }
+                else if (File.Exists(idmExe))
+                {
+                    lblStatPath.Text = "自动捕获 ✓";
+                    lblStatPath.Foreground = new SolidColorBrush(Color.FromRgb(63, 185, 80));
+                }
+                else
+                {
+                    lblStatPath.Text = "未找到 ⚠";
+                    lblStatPath.Foreground = new SolidColorBrush(ColAmber);
+                }
+            }
+
+            // 6. 原版备份按钮状态
             if (btnRestoreOrig != null)
             {
                 bool hasBak = File.Exists(idmBak);
@@ -2112,13 +2395,17 @@ namespace IDM_Toolkit_Wpf
             if (idx == 0) // 刷新
             {
                 RefreshAllStatus();
-                Log("运行状态仪表盘与系统信息已刷新完成。");
+                Log("运行状态仪表盘与系统信息已刷新完成。当前路径: " + GetIDMDir());
             }
-            else if (idx == 1) // 终止进程
+            else if (idx == 1) // 手动定位 IDM 路径
+            {
+                PromptSelectIDMPath();
+            }
+            else if (idx == 2) // 终止进程
             {
                 KillIDM();
             }
-            else if (idx == 2) // 启动进程
+            else if (idx == 3) // 启动进程
             {
                 string idmExe = Path.Combine(GetIDMDir(), "IDMan.exe");
                 if (File.Exists(idmExe))
@@ -2130,10 +2417,11 @@ namespace IDM_Toolkit_Wpf
                 }
                 else
                 {
-                    Log("未找到 IDMan.exe 主程序。");
+                    Log("未找到 IDMan.exe 主程序，请尝试点击【手动定位 IDM 路径】。");
+                    ModernDialog.ShowWarning(this, "未找到程序", "未找到 IDMan.exe 主程序！\n\n如果您的 IDM 安装在其他盘符（如 D盘、E盘），请点击左侧或工具箱的【手动定位 IDM 路径】指定 IDMan.exe。");
                 }
             }
-            else if (idx == 3) // 一键还原官方原版
+            else if (idx == 4) // 一键还原官方原版
             {
                 RestoreOriginal();
             }
@@ -2166,8 +2454,12 @@ namespace IDM_Toolkit_Wpf
                     }
                     else
                     {
-                        ModernDialog.ShowWarning(this, "未找到目录", "未检测到 IDM 安装目录，请确认是否已安装 IDM。");
+                        ModernDialog.ShowWarning(this, "未找到目录", "未检测到 IDM 安装目录，请点击【定位路径】手动指定 IDMan.exe 所在文件夹。");
                     }
+                }
+                else if (idx == 3) // 手动定位路径
+                {
+                    PromptSelectIDMPath();
                 }
             }
             catch (Exception ex)
