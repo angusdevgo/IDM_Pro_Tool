@@ -5,7 +5,7 @@
 <h1 align="center">IDM Pro Tool</h1>
 
 <p align="center">
-  <strong>多功能 Internet Download Manager 原生 C# / WPF 激活与状态维护套件</strong>
+  <strong>多功能 Internet Download Manager 原生 C# 激活与状态维护套件</strong>
 </p>
 
 <p align="center">
