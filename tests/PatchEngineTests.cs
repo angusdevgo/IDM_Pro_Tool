@@ -217,8 +217,9 @@ namespace IDM_Toolkit_Wpf
             string b123 = args.Length > 3 ? args[3] : Path.Combine("..", "samples", "IDMan_643b12_original.exe");
             string b153 = args.Length > 4 ? args[4] : Path.Combine("..", "samples", "IDMan_643b15_original.exe");
             string b163 = args.Length > 5 ? args[5] : Path.Combine("..", "samples", "IDMan_643b16_original.exe");
+            string b183 = args.Length > 6 ? args[6] : Path.Combine("..", "samples", "IDMan_643b18_original.exe");
 
-            foreach (var p in new[] { b10, b112, b113, b123, b153, b163 })
+            foreach (var p in new[] { b10, b112, b113, b123, b153, b163, b183 })
                 if (!File.Exists(p)) { Console.WriteLine("找不到样本: " + p); Environment.ExitCode = 2; return; }
 
             string baseDir = Path.Combine(Path.GetTempPath(), "idm_aob_test_" + Guid.NewGuid().ToString("N").Substring(0, 8));
@@ -230,12 +231,14 @@ namespace IDM_Toolkit_Wpf
             Console.WriteLine("b12.3 : " + b123);
             Console.WriteLine("b15.3 : " + b153);
             Console.WriteLine("b16.3 : " + b163);
+            Console.WriteLine("b18.3 : " + b183);
             Console.WriteLine();
 
             // 用例 0：校验和算法自校验
             Console.WriteLine("=== 用例0: PE 校验和算法自校验（对齐官方原版）===");
             foreach (var pair in new[] { new[] { "b10", b10 }, new[] { "b11.2", b112 }, new[] { "b11.3", b113 },
-                                          new[] { "b12.3", b123 }, new[] { "b15.3", b153 }, new[] { "b16.3", b163 } })
+                                          new[] { "b12.3", b123 }, new[] { "b15.3", b153 }, new[] { "b16.3", b163 },
+                                          new[] { "b18.3", b183 } })
             {
                 byte[] d = File.ReadAllBytes(pair[1]);
                 MainWindow.PeInfo pi; string er;
@@ -260,6 +263,8 @@ namespace IDM_Toolkit_Wpf
                 "5891512A646714CE49C1C229FCAEFB8BB186058AF38C9DFB038E57AC7780CF5D");
             RunVersion("IDM 6.43 build 16 (6.43.16.3)", b163, baseDir,
                 "8F77A3E8099F191C165E7733618B3DEAA702FFFC4D392696ECDDB555A029B5EE");
+            RunVersion("IDM 6.43 build 18 (6.43.18.3)", b183, baseDir,
+                "DED287E0043EF3BFA41D456BAD9E498E2B5775A3486F80C27FF5FDCAF03CE954");
 
             // 备份/还原相关
             RunStaleBackupCase(b10, b113, baseDir);

@@ -101,8 +101,8 @@ The **v3 architecture** transitions to an **Array of Bytes (AOB) Pattern Signatu
 4. If **any required site** fails to match, the engine aborts with zero disk modifications.
 5. Signatures are derived from **cross-version common invariant regions**, filtering out compiler-generated relocation pointers.
 
-> Current signatures are validated across **six releases**: **6.43 build 10**, **build 11 (6.43.11.2)**, **build 11 (6.43.11.3)**, **build 12 (6.43.12.3)**, **build 15 (6.43.15.3)**, and **build 16 (6.43.16.3)**.  
-> The **15 required sites** match uniquely across all six versions (including Site #16 which cuts off the background auto-update timer).  
+> Current signatures are validated across **seven releases**: **6.43 build 10**, **build 11 (6.43.11.2)**, **build 11 (6.43.11.3)**, **build 12 (6.43.12.3)**, **build 15 (6.43.15.3)**, **build 16 (6.43.16.3)**, and **build 18 (6.43.18.3)**.  
+> The **15 required sites** match uniquely across all seven versions (including Site #16 which cuts off the background auto-update timer).  
 > The **16th entry (Site #15)** is an optional version-adaptive patch targeting the build 11.3+ registration dialog behavior (see §0.2); it does not exist in build 10 / 11.2 and is skipped automatically.
 
 ### 0.1 Version-Aware Backup Mechanism (Preventing Stale Rollback Points)
@@ -145,6 +145,7 @@ Preflight gating requires that all required sites are satisfied: `requiredOk == 
 | **build 12 (12.3)** | **16 / 16** | `51088CC0…` — All Active |
 | **build 15 (15.3)** | **16 / 16** | `5891512A…` — All Active |
 | **build 16 (16.3)** | **16 / 16** | `8F77A3E8…` — All Active |
+| **build 18 (18.3)** | **16 / 16** | `DED287E0…` — All Active |
 
 ### 0.3 Build 15 (6.43.15.3) — Silent Auto-Update Invalidation
 
@@ -186,6 +187,38 @@ The v1.4.0 engine correctly **refused to write** (9 of 15 signatures missed, zer
 4. **Zero regression on legacy releases** — patched output hashes for builds 10, 11.2, 11.3, 12.3 and 15.3 are **byte-identical** to v1.5.1. Two independent implementations (the C# engine and a standalone Python reference patcher) produce the same SHA-256 for build 16.3, cross-validating the patch semantics.
 
 **Verification discipline applied**: the differential byte audit confirms **32 changed bytes** in the overlapping region — all inside patch sites ∪ PE checksum ∪ security directory — plus a 10,608-byte Authenticode tail truncation. Nothing outside the whitelist changed.
+
+### 0.6 Build 18 (6.43.18.3) — Zero-Drift Reflow & the Return on the 48-Byte Signature Cap
+
+**Observed failure mode**: After an official silent update to build 18, both the registration dialog and the trial-countdown popup reappeared, with `idmvers` reset to `v6.43b18 Trial`.
+
+**Root cause**: Build 18 skipped build 17 entirely and re-compiled `.text` again — but in the **opposite direction** from build 16:
+
+| Section | build 16 | build 18 | Delta |
+| :--- | ---: | ---: | ---: |
+| `.text` raw | 0x2D0600 | 0x2D6600 | **+24,576** |
+| `.rdata` raw | 0xEB800 | 0xEBE00 | +1,536 |
+| `.data` raw | 0xA800 | 0xA800 | **±0** |
+| `.rsrc` raw | 0x22D800 | 0x22D800 | **±0** |
+| `.reloc` raw | 0x39E00 | 0x3A000 | +512 |
+| File size | 6,490,480 | 6,517,104 | +26,624 |
+
+Every section VA shifted by exactly `+0x6000` (except `.text`, which still starts at `0x1000`). Unlike build 16 — where in-section code shifted *forward* by `+0x1D0`…`+0x5E0` — build 18 compacts code *backward* by **`-0x320`…`-0x9A0`**, while the data segment moves forward by `+0x6600` (`0x3BCF24` → `0x3C3524`). A negative direction change is normally the harder case for signature matching, because the drift accumulates in the opposite sense from the last calibration.
+
+**Extension work performed — and what did *not* need doing**:
+
+1. **Exact-match pre-check first** — before any Hamming search, the v1.6.1 table was run verbatim against build 18. Result: **16 / 16 sites matched exactly, at Hamming distance 0**. No signature regeneration was required at all.
+2. **Why the 48-byte cap paid off** — build 18's displacement magnitude (`-0x9A0`) exceeds build 16's (`+0x5E0`), yet the table survived unchanged. A shorter, minimum-sufficient table (the 142-byte variant rejected during v1.6.1) would have collided; the chosen 48-byte cap keeps 22.9 B average length while carrying enough context to bridge a 2.4 KB inter-version shift.
+3. **Semantic re-verification anyway** — all 16 sites were re-disassembled with capstone against build 18. Fifteen code sites still land on instruction boundaries with unchanged mnemonics (`test eax,eax`, `and eax,0xf`, `push -1`, `push ebp`, `je`, `jne`); Site #12 remains the sole **operand patch** (`mov eax,1` at `0x995F0`, patched byte at `+1` → `mov eax,0`); the `.data` constant block is byte-identical.
+4. **Structural forensics for new anti-tamper** — the UTF-16 resource string diff between build 16 and build 18 yields only **10 new strings**, none of them license-, trial-, or update-related (they are `6, 43, 18, 3`, a sound-path template, a SOCKS dialog fragment, `gnlaapi.dll`, `TLS13_OFF`, `English`). Conclusion: no new defensive mechanism was introduced; the failure was pure binary reflow.
+
+**Verification discipline applied**: the differential byte audit reports **33 changed bytes** in the overlapping region — 26 patch-site bytes + 4 checksum bytes + 4 security-directory bytes (8 zeroed, 4 of which were already zero) — **zero outside the whitelist** — plus a 10,608-byte Authenticode tail truncation. Patched output is 6,506,496 bytes (`pe.ImageEnd`), SHA-256 `DED287E0…F03CE954`, PE checksum `0x006371AE`.
+
+**Runtime confirmation**: cold start of the patched build 18 yields exactly **one** visible window (`#32770`, title `Internet Download Manager 6.43` — no `(Trial)` suffix), no registration dialog, no trial-countdown popup, and IDM self-reports `idmvers = v6.43b18 Full` in `HKCU\Software\DownloadManager`.
+
+> **Methodology takeaway**: the value of a version-adaptive signature table is measured not by how many releases it was *built* from, but by how many releases it *works on without being rebuilt*. Build 18 was absorbed with a zero-byte table change — the first such release in this project's history.
+
+---
 
 ---
 
@@ -294,27 +327,29 @@ IDM_Pro_Tool/
 
 This toolkit is rigorously tested against official retail distribution binaries:
 
-| Verification Item | build 10 | build 11 (6.43.11.2) | build 11 (6.43.11.3) | build 12 (6.43.12.3) | build 15 (6.43.15.3) | build 16 (6.43.16.3) |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Product Version** | `IDMan.exe` v6.43.10.2 | v6.43.11.2 | v6.43.11.3 | v6.43.12.3 | v6.43.15.3 | v6.43.16.3 |
-| **Stock File Size** | 6,199,664 bytes | 6,200,176 bytes | 6,200,176 bytes | 6,200,176 bytes | 6,201,712 bytes | 6,490,480 bytes |
-| **Stock SHA-256** | `03CC62E9…D16D607C` | `E8B0459D…9AB9DD4E69` | `D0993EC0…7CDB194C6A` | `7B8D9ABA…099F214E` | `279CEED9…8A7CE737` | `75AC33A7…C2145285` |
-| **Stock PE Checksum** | `0x005ECD00` | `0x005EF1D7` | `0x005E9C44` | `0x005EF806` | `0x005F549C` | `0x00630D90` |
-| **Patched File Size** | 6,189,056 bytes | 6,189,568 bytes | 6,189,568 bytes | 6,189,568 bytes | 6,191,104 bytes | 6,479,872 bytes |
-| **Patched SHA-256 (v1.3.0)** | `712BD0D9…36FCC79CC6` | `3470B5B8…DEA6CD601D8` | `F4CF6939…20F920A5F4` | — | — | — |
-| **Patched Checksum (v1.3.0)** | `0x005EBDA3` | `0x005E84FA` | `0x005F4B5D` | — | — | — |
-| **Patched SHA-256 (v1.4.0)** | `712BD0D9…36FCC79CC6` | `3470B5B8…DEA6CD601D8` | `641A6D97…B6CC404763E` | — | — | — |
-| **Patched Checksum (v1.4.0)** | `0x005EBDA3` | `0x005E84FA` | `0x005EC25E` | — | — | — |
-| **Patched SHA-256 (v1.5.0)** | `712BD0D9…36FCC79CC6` | `3470B5B8…DEA6CD601D8` | `641A6D97…B6CC404763E` | `B9B6F951…07739B3E` | `5005D219…3F43466C` | — |
-| **Patched Checksum (v1.5.0)** | `0x005EBDA3` | `0x005E84FA` | `0x005EC25E` | `0x005F6E1F` | `0x005EC77B` | — |
-| **Patched SHA-256 (v1.5.1)** | `69F95587…61220F9A` | `0A22C48B…257D5AC8` | `02627D24…3AE2B0B5` | `51088CC0…ADBBB71A` | `5891512A…7780CF5D` | — |
-| **Patched Checksum (v1.5.1)** | `0x005F33A3` | `0x005EFAFA` | `0x005F385E` | `0x005EE420` | `0x005F3D7B` | — |
-| **Patched SHA-256 (v1.6.1)** | `69F95587…61220F9A` | `0A22C48B…257D5AC8` | `02627D24…3AE2B0B5` | `51088CC0…ADBBB71A` | `5891512A…7780CF5D` | `8F77A3E8…A029B5EE` |
-| **Patched Checksum (v1.6.1)** | `0x005F33A3` | `0x005EFAFA` | `0x005F385E` | `0x005EE420` | `0x005F3D7B` | `0x0063A19B` |
+| Verification Item | build 10 | build 11 (6.43.11.2) | build 11 (6.43.11.3) | build 12 (6.43.12.3) | build 15 (6.43.15.3) | build 16 (6.43.16.3) | build 18 (6.43.18.3) |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Product Version** | `IDMan.exe` v6.43.10.2 | v6.43.11.2 | v6.43.11.3 | v6.43.12.3 | v6.43.15.3 | v6.43.16.3 | v6.43.18.3 |
+| **Stock File Size** | 6,199,664 bytes | 6,200,176 bytes | 6,200,176 bytes | 6,200,176 bytes | 6,201,712 bytes | 6,490,480 bytes | 6,517,104 bytes |
+| **Stock SHA-256** | `03CC62E9…D16D607C` | `E8B0459D…9AB9DD4E69` | `D0993EC0…7CDB194C6A` | `7B8D9ABA…099F214E` | `279CEED9…8A7CE737` | `75AC33A7…C2145285` | `67D2D6AA…25C7E686` |
+| **Stock PE Checksum** | `0x005ECD00` | `0x005EF1D7` | `0x005E9C44` | `0x005EF806` | `0x005F549C` | `0x00630D90` | `0x00643BFE` |
+| **Patched File Size** | 6,189,056 bytes | 6,189,568 bytes | 6,189,568 bytes | 6,189,568 bytes | 6,191,104 bytes | 6,479,872 bytes | 6,506,496 bytes |
+| **Patched SHA-256 (v1.3.0)** | `712BD0D9…36FCC79CC6` | `3470B5B8…DEA6CD601D8` | `F4CF6939…20F920A5F4` | — | — | — | — |
+| **Patched Checksum (v1.3.0)** | `0x005EBDA3` | `0x005E84FA` | `0x005F4B5D` | — | — | — | — |
+| **Patched SHA-256 (v1.4.0)** | `712BD0D9…36FCC79CC6` | `3470B5B8…DEA6CD601D8` | `641A6D97…B6CC404763E` | — | — | — | — |
+| **Patched Checksum (v1.4.0)** | `0x005EBDA3` | `0x005E84FA` | `0x005EC25E` | — | — | — | — |
+| **Patched SHA-256 (v1.5.0)** | `712BD0D9…36FCC79CC6` | `3470B5B8…DEA6CD601D8` | `641A6D97…B6CC404763E` | `B9B6F951…07739B3E` | `5005D219…3F43466C` | — | — |
+| **Patched Checksum (v1.5.0)** | `0x005EBDA3` | `0x005E84FA` | `0x005EC25E` | `0x005F6E1F` | `0x005EC77B` | — | — |
+| **Patched SHA-256 (v1.5.1)** | `69F95587…61220F9A` | `0A22C48B…257D5AC8` | `02627D24…3AE2B0B5` | `51088CC0…ADBBB71A` | `5891512A…7780CF5D` | — | — |
+| **Patched Checksum (v1.5.1)** | `0x005F33A3` | `0x005EFAFA` | `0x005F385E` | `0x005EE420` | `0x005F3D7B` | — | — |
+| **Patched SHA-256 (v1.6.1)** | `69F95587…61220F9A` | `0A22C48B…257D5AC8` | `02627D24…3AE2B0B5` | `51088CC0…ADBBB71A` | `5891512A…7780CF5D` | `8F77A3E8…A029B5EE` | — |
+| **Patched Checksum (v1.6.1)** | `0x005F33A3` | `0x005EFAFA` | `0x005F385E` | `0x005EE420` | `0x005F3D7B` | `0x0063A19B` | — |
+| **Patched SHA-256 (v1.6.2)** | `69F95587…61220F9A` | `0A22C48B…257D5AC8` | `02627D24…3AE2B0B5` | `51088CC0…ADBBB71A` | `5891512A…7780CF5D` | `8F77A3E8…A029B5EE` | `DED287E0…F03CE954` |
+| **Patched Checksum (v1.6.2)** | `0x005F33A3` | `0x005EFAFA` | `0x005F385E` | `0x005EE420` | `0x005F3D7B` | `0x0063A19B` | `0x006371AE` |
 
 > *Note on Historical Hashes*: Legacy crack releases (e.g. v20.7) populated the PE checksum field with `0x005F0BEA`. Exhaustive algorithmic analysis proves this value corresponds to no valid Microsoft checksum standard. This toolkit writes the **mathematically valid standard checksum**.
 
-> *Signature Invariance*: AOB patterns are anchored in multi-version invariant byte sequences, naturally immune to relocation noise. The 15 required sites match uniquely across all six tested releases (including Site #16); Site #15 automatically activates on build 11.3+ via the `Optional` subsystem.
+> *Signature Invariance*: AOB patterns are anchored in multi-version invariant byte sequences, naturally immune to relocation noise. The 15 required sites match uniquely across all seven tested releases (including Site #16); Site #15 automatically activates on build 11.3+ via the `Optional` subsystem.
 
 ---
 
